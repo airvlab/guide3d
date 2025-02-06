@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -9,7 +10,7 @@ from torchvision import transforms
 from torchvision.io import read_image
 
 from guide3d.dataset.dataset_utils import BaseGuide3D
-from guide3d.utils.utils import preprocess_tck, split_fn_image
+from guide3d.utils import preprocess_tck, sample_spline, split_fn_image
 
 IMAGE_SIZE = 1024
 N_CHANNELS = 1
@@ -26,6 +27,80 @@ image_transform = transforms.Compose(
         ),
     ]
 )
+
+
+def visualize_sample(sample, spline_sample_n=100):
+    """
+    Visualize a single sample from the Guide3D dataset.
+
+    The sample is expected to be a tuple:
+      - img: Tensor of shape [C, H, W] (normalized using mean=0.5, std=0.5)
+      - target_seq: Tensor of shape [max_length, D] where the first column is t
+                    and the remaining columns are control coordinates c.
+      - target_mask: Tensor of shape [max_length] (1 for valid entries, 0 for padding)
+
+    This function:
+      1. Denormalizes and converts the image for display.
+      2. Extracts valid control points from target_seq.
+      3. Constructs a tck tuple (with t as knot vector, c as control points, k=3),
+         adjusts the shape of c as needed, and samples the spline using sample_spline.
+      4. Overlays both the control points and the sampled spline curve.
+    """
+    # Unpack the sample tuple.
+    img, target_seq, target_mask = sample
+
+    # --- 1. Denormalize the image ---
+    # (Assuming image normalization with mean=0.5 and std=0.5.)
+    img_denorm = img * 0.5 + 0.5
+
+    # Convert image to a NumPy array.
+    # For a grayscale image, squeeze out the channel dimension.
+    img_np = img_denorm.permute(1, 2, 0).cpu().numpy()
+    if img_np.shape[-1] == 1:
+        img_np = img_np.squeeze(-1)
+
+    # --- 2. Extract valid control points ---
+    # Use the target_mask to select only the valid rows from target_seq.
+    valid_seq = target_seq[target_mask == 1]  # shape: (n_valid, D)
+    valid_seq = valid_seq.cpu().numpy()
+
+    t_vals = valid_seq[:, 0]
+    c_vals = valid_seq[:, 1:]
+
+    # We assume that the first column corresponds to t values (parameter values)
+    # and the remaining columns are control point coordinates.
+    zeros_to_add = 4  # Change this number if your spline degree (k) is different.
+    full_t_vals = np.concatenate((np.zeros(zeros_to_add), t_vals))
+
+    # --- 4. Construct the spline representation and sample it ---
+    k = 3  # Spline degree.
+    # Note: SciPy's splev expects the control points array in shape (dim, n_points),
+    # so we transpose c_vals.
+    tck = (full_t_vals, c_vals.T, k)
+    spline_points = sample_spline(tck, n=spline_sample_n)
+
+    # --- 4. Plotting ---
+    plt.figure(figsize=(8, 8))
+
+    # Display the image.
+    if len(img_np.shape) == 2:
+        plt.imshow(img_np, cmap="gray")
+    else:
+        plt.imshow(img_np)
+
+    # Plot the control points.
+    # Note: Depending on your coordinate system, you may need to flip axes.
+    plt.scatter(c_vals[:, 0], c_vals[:, 1], c="red", s=50, label="Control Points")
+
+    # Plot the spline curve.
+    # Since sample_spline returns an array with shape (n_points, 2),
+    # we treat the first column as x and the second as y.
+    plt.plot(spline_points[:, 0], spline_points[:, 1], c="blue", linewidth=2, label="Spline Curve")
+
+    plt.title("Guide3D Sample Visualization with Spline")
+    plt.axis("off")
+    plt.legend()
+    plt.show()
 
 
 def process_data(
@@ -149,11 +224,15 @@ def main():
         image_transform=image_transform,
     )
     dataloader = data.DataLoader(dataset, batch_size=2, shuffle=False)
+
     print(len(dataset))
     batch = next(iter(dataloader))
     for batch in dataloader:
         img, target_seq, target_mask = batch
-        exit()
+        sample = (img[0], target_seq[0], target_mask[0])
+
+        # Visualize the sample
+        visualize_sample(sample)
 
 
 if __name__ == "__main__":

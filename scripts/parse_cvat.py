@@ -16,9 +16,7 @@ def parse_polyline(polyline_element: ET.Element) -> np.ndarray:
 
 def parse_image(image_element: ET.Element) -> Dict[str, Union[str, np.ndarray]]:
     name: str = image_element.get("name", "")
-    polylines: List[ET.Element] = [
-        parse_polyline(polyline) for polyline in image_element.findall("polyline")
-    ]
+    polylines: List[ET.Element] = [parse_polyline(polyline) for polyline in image_element.findall("polyline")]
     points: Union[np.ndarray, None] = polylines[0] if polylines else None
     return {"name": name, "points": points}
 
@@ -35,7 +33,7 @@ def extract_properties(name: str) -> (str, str):
     task, sample_number = name.split("/")
     camera_number: str = task[-1]
     task_name: str = task[:-2]
-    identifier: str = f'{task_name}-{sample_number.split(".")[0]}'
+    identifier: str = f"{task_name}-{sample_number.split('.')[0]}"
     return identifier, camera_number
 
 
@@ -57,9 +55,7 @@ def pair_camera_annotations(
 def get_structured_dataset(
     annotation_file_path: Union[str, Path],
 ) -> List[Dict[str, Any]]:
-    annotations: List[Dict[str, Union[str, np.ndarray]]] = parse_annotation_file(
-        annotation_file_path
-    )
+    annotations: List[Dict[str, Union[str, np.ndarray]]] = parse_annotation_file(annotation_file_path)
     paired_annotations: List[Dict[str, Any]] = pair_camera_annotations(annotations)
     return paired_annotations
 
@@ -71,9 +67,7 @@ if __name__ == "__main__":
     import vars
 
     dataset_path: Path = vars.dataset_path
-    structured_dataset: List[Dict[str, Any]] = get_structured_dataset(
-        "data/annotations/cvat.xml"
-    )
+    structured_dataset: List[Dict[str, Any]] = get_structured_dataset("data/annotations/cvat.xml")
     print(f"Number of paired annotations: {len(structured_dataset)}")
 
     lengths = []
@@ -81,9 +75,7 @@ if __name__ == "__main__":
         points1 = entry["points1"]
         points2 = entry["points2"]
 
-        p1, p2, p3d = reconstruct.get_points(
-            points1, points2, calibration.P1, calibration.P2
-        )
+        p1, p2, p3d = reconstruct.get_points(points1, points2, calibration.P1, calibration.P2)
         length = fn.interpolate_even_spacing(p3d, spacing=0.17).shape[0]
         lengths.append(length)
 
