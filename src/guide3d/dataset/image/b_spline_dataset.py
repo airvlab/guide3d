@@ -10,6 +10,7 @@ from torch.utils import data
 from torchvision import transforms
 from torchvision.io import read_image
 
+from guide3d.dataprocessor import DataProcessor
 from guide3d.dataset.base_dataset import BaseGuide3DDataset
 from guide3d.utils import sample_spline
 
@@ -28,6 +29,44 @@ image_transform = transforms.Compose(
         ),
     ]
 )
+
+
+class BSplineDataProcessor(DataProcessor):
+    """Default implementation of DataProcessor with optional augmentation."""
+
+    def process_data(self, raw_data: List[Dict]) -> List:
+        """Processes raw data and optionally applies augmentation."""
+        frames = []
+        for video_pair in raw_data:
+            for frame in video_pair["frames"]:
+                imageA = frame["cameraA"]["image"]
+                imageB = frame["cameraB"]["image"]
+
+                ptsA = frame["cameraA"]["points"]
+                ptsB = frame["cameraB"]["points"]
+
+                frames.append({"image": imageA, "points": ptsA})
+                frames.append({"image": imageB, "points": ptsB})
+
+        return frames
+
+    def apply_augmentation(self, data: List[Dict]) -> List[Dict]:
+        return data
+
+    def split_data(self, data: List[Dict], split: str, split_ratio: Tuple[float, float, float]) -> List:
+        """Splits the dataset into train, val, and test sets at the frame level."""
+        np.random.shuffle(data)
+
+        num_frames = len(data)
+        train_idx = int(split_ratio[0] * num_frames)
+        val_idx = train_idx + int(split_ratio[1] * num_frames)
+
+        train_data = data[:train_idx]
+        val_data = data[train_idx:val_idx]
+        test_data = data[val_idx:]
+
+        splits = {"train": train_data, "val": val_data, "test": test_data}
+        return splits.get(split, [])
 
 
 class Guide3D(BaseGuide3DDataset):
@@ -225,11 +264,27 @@ class Guide3D(BaseGuide3DDataset):
 
 def main():
     import guide3d.vars as vars
+    from guide3d.dataprocessor import ImageDataProcessor
+    from guide3d.downloader import GDriveDownloader
 
+    # Create the processor (handles annotations automatically)
+    data_processor = ImageDataProcessor(save_processed=True, annotation_filename="my_dataset.json")
+
+    # Create a downloader (if needed)
+    downloader = GDriveDownloader(file_id="1oRC_cQwGzrZ1XspPr9zwu6_rjWQE_kyI")
+
+    # Create dataset instance
     dataset = Guide3D(
-        vars.dataset_path,
-        image_transform=image_transform,
+        dataset_path=vars.dataset_path,
+        data_processor=data_processor,
+        downloader=downloader,
+        download=False,
     )
+
+    # dataset = Guide3D(
+    #     vars.dataset_path,
+    #     image_transform=image_transform,
+    # )
     dataloader = data.DataLoader(dataset, batch_size=2, shuffle=False)
 
     print(len(dataset))

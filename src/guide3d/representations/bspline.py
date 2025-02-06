@@ -1,8 +1,33 @@
+from typing import Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import splev, splprep
 from scipy.special import comb
 from sklearn.metrics import mean_squared_error
+
+
+class BSpline:
+    def __init__(self, s: float = None, k: int = 3, eps: float = 1e-10):
+        self.s = s
+        self.k = k
+        self.eps = eps
+
+    def fit_curve(self, pts: np.ndarray) -> Tuple:
+        if pts.shape[1] not in {2, 3}:
+            raise ValueError("Input points must be 2D or 3D")
+
+        # Compute cumulative distances
+        deltas = np.diff(pts, axis=0)
+        distances = np.sqrt((deltas**2).sum(axis=1) + self.eps)
+        cumulative_distances = np.insert(np.cumsum(distances), 0, 0)
+
+        # Fit spline
+        tck, u = splprep(pts.T, s=self.s, k=self.k, u=cumulative_distances)
+        return tck, u
+
+    def sample_spline(self) -> np.ndarray:
+        pass
 
 
 # Function to compute the residual sum of squares (RSS)
