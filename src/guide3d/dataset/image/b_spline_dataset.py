@@ -1,17 +1,18 @@
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from scipy.interpolate import splprep
 from torch.utils import data
 from torchvision import transforms
 from torchvision.io import read_image
 
 from guide3d.dataprocessor import DataProcessor
 from guide3d.dataset.base_dataset import BaseGuide3DDataset
+from guide3d.downloader import Downloader
+from guide3d.representations.bspline import BSpline
 from guide3d.utils import sample_spline
 
 IMAGE_SIZE = 1024
@@ -45,8 +46,11 @@ class BSplineDataProcessor(DataProcessor):
                 ptsA = frame["cameraA"]["points"]
                 ptsB = frame["cameraB"]["points"]
 
-                frames.append({"image": imageA, "points": ptsA})
-                frames.append({"image": imageB, "points": ptsB})
+                curveA = BSpline(np.array(ptsA))
+                curveB = BSpline(np.array(ptsB))
+
+                frames.append({"image": imageA, "curve": curveA.to_json()})
+                frames.append({"image": imageB, "curve": curveB.to_json()})
 
         return frames
 
@@ -69,21 +73,63 @@ class BSplineDataProcessor(DataProcessor):
         return splits.get(split, [])
 
 
-class Guide3D(BaseGuide3DDataset):
-    """Guide3D dataset
+class Guide3DBSplineImageDataset(BaseGuide3DDataset):
+    def __init__(
+        self,
+        dataset_path: Union[str, Path],
+        download: bool = False,
+        downloader: Optional[Downloader] = None,
+        split: str = "train",
+        split_ratio: Tuple[float, float, float] = (0.8, 0.1, 0.1),
+        augment: bool = False,
+        force_preprocess: bool = False,
+    ):
+        data_processor = BSplineDataProcessor(
+            save_processed=True,
+            annotation_filename="b_spline_image_dataset.json",
+            force_reprocess=force_preprocess,
+        )
 
-    The dataset contains images and their corresponding t, c, u values,
-    where:
+        super().__init__(
+            dataset_path=dataset_path,
+            data_processor=data_processor,
+            downloader=downloader,
+            download=download,
+            split=split,
+            split_ratio=split_ratio,
+            augment=augment,
+        )
 
-    t: knot vector
-    c: spline coefficients
-    u: parameter values
+    def __len__(self) -> int:
+        return len(self.data)
 
-    K, the degree of the spline, is 3.
-    T, the knot vector, is of length n + k + 1, where n is the number of control
-    points. The first k + 1 values are 0.
-    """
+    def __getitem__(self, idx: int):
+        sample = self.data[idx]
+        img = read_image(str(self.dataset_path / sample["image"]))
+        curve = sample["curve"]
+        spline = BSpline().from_json(curve)
+        spline = spline.to_tensor()
+        exit()
 
+        t, c, _ = sample["tck"]
+
+        t = torch.tensor(t[4:], dtype=torch.float32).unsqueeze(-1)
+        c = np.array(c)
+        c = torch.tensor(c.T, dtype=torch.float32)
+
+        if self.image_transform:
+            img = self.image_transform(img)
+
+        seq_len = torch.tensor(len(t), dtype=torch.int32)
+        target_seq = F.pad(torch.cat([t, c], dim=-1), (0, 0, 0, self.max_length - seq_len))
+
+        target_mask = torch.ones(self.max_length, dtype=torch.int32)
+        target_mask[seq_len:] = 0
+
+        return img, target_seq, target_mask
+
+
+class Guide3DBSpline(BaseGuide3DDataset):
     k = 3
 
     def __init__(
@@ -95,7 +141,7 @@ class Guide3D(BaseGuide3DDataset):
         split_ratio: tuple = (0.8, 0.1, 0.1),
         download: bool = False,
     ):
-        super(Guide3D, self).__init__(
+        super(Guide3DBSpline, self).__init__(
             dataset_path=dataset_path,
             annotation_file=annotation_file,
             save_processed=False,
@@ -135,73 +181,6 @@ class Guide3D(BaseGuide3DDataset):
         target_mask[seq_len:] = 0
 
         return img, target_seq, target_mask
-
-    @staticmethod
-    def fit_spline(pts: np.ndarray, s: float = None, k: int = 3, eps: float = 1e-10):
-        if pts.shape[1] not in {2, 3}:
-            raise ValueError("Input points must be 2D or 3D")
-
-        # Compute cumulative distances
-        deltas = np.diff(pts, axis=0)
-        distances = np.sqrt((deltas**2).sum(axis=1) + eps)
-        cumulative_distances = np.insert(np.cumsum(distances), 0, 0)
-
-        # Fit spline
-        tck, u = splprep(pts.T, s=s, k=k, u=cumulative_distances)
-        return tck, u
-
-    def process_data(self, raw_data: List[Dict]) -> List[List[Dict]]:
-        video_pairs = []
-        for video_pair in raw_data:
-            videoA = []
-            videoB = []
-            for frame in video_pair["frames"]:
-                imageA = frame["cameraA"]["image"]
-                imageB = frame["cameraB"]["image"]
-
-                ptsA = np.array(frame["cameraA"]["points"])
-                ptsB = np.array(frame["cameraB"]["points"])
-
-                tckA, uA = self.fit_spline(ptsA)
-                tckB, uB = self.fit_spline(ptsB)
-
-                videoA.append({"image": imageA, "tck": tckA, "u": uA.tolist()})
-                videoB.append({"image": imageB, "tck": tckB, "u": uB.tolist()})
-
-            video_pairs.append(videoA)
-            video_pairs.append(videoB)
-
-        return video_pairs
-
-    @staticmethod
-    def split_data(data: List[List[Dict]], split: str, split_ratio: Tuple[float, float, float]) -> List[Dict]:
-        """
-        Splits the processed video data into train, validation, and test sets.
-
-        Args:
-            data (List[List[Dict]]): Processed video data where each video is a list of frames.
-            split (str): One of "train", "val", or "test".
-            split_ratio (Tuple[float, float, float]): Ratios for train, val, and test splits.
-
-        Returns:
-            List[Dict]: The split data corresponding to the requested split type.
-        """
-        split_data = {"train": [], "val": [], "test": []}
-
-        for video in data:
-            num_frames = len(video)
-            train_idx = int(split_ratio[0] * num_frames)
-            val_idx = int(split_ratio[1] * num_frames)
-
-            split_data["train"].extend(video[:train_idx])
-            split_data["val"].extend(video[train_idx : train_idx + val_idx])
-            split_data["test"].extend(video[train_idx + val_idx :])
-
-        return split_data[split]
-
-    @staticmethod
-    def read_processed_annotations(path: Path) -> List:
-        pass
 
     @staticmethod
     def visualize_sample(sample, spline_sample_n=100):
@@ -264,37 +243,17 @@ class Guide3D(BaseGuide3DDataset):
 
 def main():
     import guide3d.vars as vars
-    from guide3d.dataprocessor import ImageDataProcessor
-    from guide3d.downloader import GDriveDownloader
 
-    # Create the processor (handles annotations automatically)
-    data_processor = ImageDataProcessor(save_processed=True, annotation_filename="my_dataset.json")
+    dataset = Guide3DBSplineImageDataset(vars.dataset_path, True, force_preprocess=True)
 
-    # Create a downloader (if needed)
-    downloader = GDriveDownloader(file_id="1oRC_cQwGzrZ1XspPr9zwu6_rjWQE_kyI")
-
-    # Create dataset instance
-    dataset = Guide3D(
-        dataset_path=vars.dataset_path,
-        data_processor=data_processor,
-        downloader=downloader,
-        download=False,
-    )
-
-    # dataset = Guide3D(
-    #     vars.dataset_path,
-    #     image_transform=image_transform,
-    # )
     dataloader = data.DataLoader(dataset, batch_size=2, shuffle=False)
-
-    print(len(dataset))
     batch = next(iter(dataloader))
     for batch in dataloader:
         img, target_seq, target_mask = batch
         sample = (img[0], target_seq[0], target_mask[0])
 
         # Visualize the sample
-        Guide3D.visualize_sample(sample)
+        Guide3DBSpline.visualize_sample(sample)
 
 
 if __name__ == "__main__":
