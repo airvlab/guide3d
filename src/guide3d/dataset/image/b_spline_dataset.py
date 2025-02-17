@@ -9,10 +9,12 @@ from torch.utils import data
 from torchvision import transforms
 from torchvision.io import read_image
 
+import guide3d.vars as vars
 from guide3d.dataprocessor import DataProcessor
 from guide3d.dataset.base_dataset import BaseGuide3DDataset
 from guide3d.downloader import Downloader
-from guide3d.representations.bspline import BSpline
+from guide3d.representations.bspline import BSplineCurve
+from guide3d.representations.cubic import CubicSplineCurve
 from guide3d.utils import sample_spline
 
 IMAGE_SIZE = 1024
@@ -46,8 +48,13 @@ class BSplineDataProcessor(DataProcessor):
                 ptsA = frame["cameraA"]["points"]
                 ptsB = frame["cameraB"]["points"]
 
-                curveA = BSpline(np.array(ptsA))
-                curveB = BSpline(np.array(ptsB))
+                curveA = BSplineCurve()
+                curveA.fit(ptsA)
+                fig, ax = plt.subplots(figsize=(6, 6))
+                ax.imshow(plt.imread(vars.dataset_path / imageA), cmap="gray")
+                curveA.plot(50, ax)
+                curveB = BSplineCurve()
+                curveB.fit(ptsB)
 
                 frames.append({"image": imageA, "curve": curveA.to_json()})
                 frames.append({"image": imageB, "curve": curveB.to_json()})
@@ -107,9 +114,8 @@ class Guide3DBSplineImageDataset(BaseGuide3DDataset):
         sample = self.data[idx]
         img = read_image(str(self.dataset_path / sample["image"]))
         curve = sample["curve"]
-        spline = BSpline().from_json(curve)
+        spline = CubicSplineCurve.from_json(curve)
         spline = spline.to_tensor()
-        exit()
 
         t, c, _ = sample["tck"]
 

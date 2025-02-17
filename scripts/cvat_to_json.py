@@ -49,7 +49,7 @@ def ensure_ordered_points(pts):
     pts = list(pts)
     if len(pts) < 2:
         return pts
-    return pts if pts[1][0] > pts[0][0] else pts[::-1]
+    return pts if pts[0][0] < pts[-1][0] else pts[::-1]
 
 
 def main():
