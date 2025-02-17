@@ -26,20 +26,20 @@ class DataProcessor(ABC):
         """Loads processed data if available; otherwise, processes and saves new data, then splits it."""
 
         if self.processed_annotations_file and not self.force_reprocess and self.processed_annotations_file.exists():
-            data = self._load_json(self.processed_annotations_file)
+            self.data = self._load_json(self.processed_annotations_file)
         elif self.raw_annotations_file.exists():
             raw_data = self._load_json(self.raw_annotations_file)
-            data = self.process_data(raw_data)
+            self.data = self.process_data(raw_data)
 
             if self.save_processed and self.processed_annotations_file:
-                self._save_json(data, self.processed_annotations_file)
+                self._save_json(self.data, self.processed_annotations_file)
         else:
             raise FileNotFoundError(
                 f"No annotations found in {self.raw_annotations_file}"
                 + (f" or {self.processed_annotations_file}" if self.processed_annotations_file else "")
             )
 
-        return self.split_data(data, split, split_ratio)
+        return self.split_data(self.data, split, split_ratio)
 
     @abstractmethod
     def process_data(self, raw_data: List[Dict]) -> List:
@@ -113,6 +113,7 @@ def main():
     )
 
     train_data = data_processor.load_data(split="train", split_ratio=(0.8, 0.1, 0.1))
+    print(data_processor.get_statistics())
     data_processor.apply_augmentation(train_data)
     val_data = data_processor.load_data(split="val", split_ratio=(0.8, 0.1, 0.1))
     test_data = data_processor.load_data(split="test", split_ratio=(0.8, 0.1, 0.1))

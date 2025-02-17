@@ -57,7 +57,7 @@ class BSplineCurve:
             {
                 "original_pts": self.original_pts.tolist(),
                 "t": self.spline.t.tolist(),
-                "c": self.control_pts.tolist(),
+                "c": self.spline.c.tolist(),
                 "k": self.spline.k,
             }
         )
