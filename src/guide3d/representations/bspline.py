@@ -1,5 +1,6 @@
 import json
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -16,14 +17,14 @@ class BSplineCurve:
         if pts.ndim != 2 or pts.shape[1] not in {2, 3}:
             raise ValueError("pts must have shape (N,2) or (N,3)")
 
-        self.spline, self.control_pts = make_splprep(pts.T, s=1e-6)
+        self.spline, self.knots = make_splprep(pts.T, s=1e-3)
 
     def sample(self, n=100):
         if self.spline is None:
             raise RuntimeError("Spline has not been fitted. Call `fit(pts)` first.")
 
         u_sample = np.linspace(0, 1, n)
-        return self.spline(u_sample).T
+        return self.spline(u_sample)
 
     def plot(self, n=100, ax=None):
         """Plots the fitted B-Spline curve."""
@@ -38,6 +39,21 @@ class BSplineCurve:
         ax.set_aspect("equal")
         ax.legend()
         plt.show()
+
+    def overlay_on_image(self, image_path, n=100, color=(0, 0, 255), thickness=2):
+        """Overlays the B-Spline curve on an image."""
+        image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError("Could not load image.")
+
+        samples = self.sample(n).astype(int)
+
+        for i in range(len(samples) - 1):
+            cv2.line(image, tuple(samples[i]), tuple(samples[i + 1]), color, thickness)
+
+        cv2.imshow("B-Spline Overlay", image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     def to_tensor(self):
         """Converts the B-Spline data to PyTorch tensors."""

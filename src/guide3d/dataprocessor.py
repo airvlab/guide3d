@@ -20,6 +20,11 @@ class DataProcessor(ABC):
         self.processed_annotations_file = (
             self.annotation_dir.joinpath("processed", annotation_filename) if annotation_filename is not None else None
         )
+        self.stats_file = (
+            self.annotation_dir.joinpath("processed", annotation_filename.split(".")[0] + "_stats.json")
+            if annotation_filename is not None
+            else None
+        )
         self.raw_annotations_file = self.annotation_dir.joinpath("raw/raw.json")
 
     def load_data(self, split: str, split_ratio: Tuple[float, float, float]) -> List:
@@ -27,17 +32,19 @@ class DataProcessor(ABC):
 
         if self.processed_annotations_file and not self.force_reprocess and self.processed_annotations_file.exists():
             self.data = self._load_json(self.processed_annotations_file)
+            if self.stats_file.exists():
+                self.stats = self._load_json(self.stats_file)  # Load stats
         elif self.raw_annotations_file.exists():
             raw_data = self._load_json(self.raw_annotations_file)
             self.data = self.process_data(raw_data)
+            self.stats = self.compute_stats(self.data)  # Compute and store stats
 
             if self.save_processed and self.processed_annotations_file:
                 self._save_json(self.data, self.processed_annotations_file)
+                self._save_json(self.stats, self.stats_file)  # Save stats
+
         else:
-            raise FileNotFoundError(
-                f"No annotations found in {self.raw_annotations_file}"
-                + (f" or {self.processed_annotations_file}" if self.processed_annotations_file else "")
-            )
+            raise FileNotFoundError(f"No annotations found in {self.raw_annotations_file}")
 
         return self.split_data(self.data, split, split_ratio)
 
@@ -67,6 +74,19 @@ class DataProcessor(ABC):
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(data, f, indent=4)
+
+    @abstractmethod
+    def compute_stats(self, data: List[Dict]) -> Dict[str, float]:
+        pass
+
+    def get_stats(self) -> Dict[str, float]:
+        """Returns computed stats if available."""
+        if not hasattr(self, "stats") or not self.stats:
+            if self.stats_file.exists():
+                self.stats = self._load_json(self.stats_file)
+            else:
+                raise ValueError("Stats have not been computed yet. Ensure data is processed first.")
+        return self.stats
 
 
 class ImageDataProcessor(DataProcessor):
